@@ -31,7 +31,7 @@ jobs:
           node-version: 22
 
       - name: Install Dependencies
-        run: npm install
+        run: npm install --include=dev --legacy-peer-deps
 
       - name: Build Static Web App
         run: npm run build
