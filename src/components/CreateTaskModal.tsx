@@ -17,6 +17,8 @@ interface CreateTaskModalProps {
   onSaveTask: (task: Omit<HomeworkTask, 'id' | 'createdAt' | 'status'>) => void;
   onOpenVoice: () => void;
   onOpenPhoto: () => void;
+  childrenList: Array<{ id: string; name: string; avatar: string }>;
+  activeChildId: string;
 }
 
 export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
@@ -25,9 +27,12 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   onSaveTask,
   onOpenVoice,
   onOpenPhoto,
+  childrenList,
+  activeChildId,
 }) => {
   if (!isOpen) return null;
 
+  const [targetChildId, setTargetChildId] = useState<string>(activeChildId);
   const [title, setTitle] = useState('');
   const [subject, setSubject] = useState<SubjectType>('chinese');
   const [description, setDescription] = useState('');
@@ -43,6 +48,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
 
     onSaveTask({
+      childId: targetChildId,
       title: title.trim(),
       subject,
       description: description.trim() || undefined,
@@ -137,6 +143,42 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
         {/* Manual Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Target Child Selector */}
+          <div>
+            <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 block">
+              布置给哪个孩子：
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {childrenList.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setTargetChildId(c.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-all ${
+                    targetChildId === c.id
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <span>{c.avatar}</span>
+                  <span>{c.name}</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setTargetChildId('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-all ${
+                  targetChildId === 'all'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <span>👫</span>
+                <span>共同作业</span>
+              </button>
+            </div>
+          </div>
+
           {/* Subject Selector */}
           <div>
             <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 block">

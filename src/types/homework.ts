@@ -21,8 +21,32 @@ export interface HomeworkReview {
   isApproved: boolean;
 }
 
+export interface ChildProfile {
+  id: string;
+  name: string;
+  grade: string;
+  avatar: string; // e.g. 👦, 👧, 🦁, 🚀, 🐼
+  totalStars: number;
+  streakDays: number;
+}
+
+export interface FamilyProfile {
+  activeChildId: string;
+  children: ChildProfile[];
+  parentPin: string; // e.g. "1234" to enter parent mode
+}
+
+export interface StudentProfile {
+  studentName: string;
+  grade: string;
+  totalStars: number;
+  streakDays: number;
+  parentPin: string;
+}
+
 export interface HomeworkTask {
   id: string;
+  childId?: string; // 'all' or specific child id
   title: string;
   subject: SubjectType;
   description?: string;

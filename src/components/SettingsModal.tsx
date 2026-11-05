@@ -11,44 +11,51 @@ import {
   Check,
   Globe,
   Sparkles,
+  Plus,
+  Trash2,
+  Users,
 } from 'lucide-react';
-import { StudentProfile } from '../types/homework';
+import { StudentProfile, ChildProfile, FamilyProfile } from '../types/homework';
 import { StorageService } from '../services/storage';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  profile: StudentProfile;
-  onUpdateProfile: (profile: StudentProfile) => void;
+  family: FamilyProfile;
+  onUpdateFamily: (family: FamilyProfile) => void;
   onDataReset: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
-  profile,
-  onUpdateProfile,
+  family,
+  onUpdateFamily,
   onDataReset,
 }) => {
   if (!isOpen) return null;
 
-  const [name, setName] = useState(profile.studentName);
-  const [grade, setGrade] = useState(profile.grade);
-  const [pin, setPin] = useState(profile.parentPin || '1234');
+  const [children, setChildren] = useState<ChildProfile[]>(family.children);
+  const [pin, setPin] = useState(family.parentPin || '1234');
   const [apiKey, setApiKey] = useState(
     localStorage.getItem('hw_gemini_api_key') || ''
   );
   const [showDeploymentHelp, setShowDeploymentHelp] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
-  const handleSaveProfile = () => {
-    const updated = {
-      ...profile,
-      studentName: name.trim() || '天天',
-      grade: grade.trim() || '小学二年级',
+  // New child input fields
+  const [newChildName, setNewChildName] = useState('');
+  const [newChildGrade, setNewChildGrade] = useState('小学一年级');
+  const [newChildAvatar, setNewChildAvatar] = useState('👦');
+  const [isAddingChild, setIsAddingChild] = useState(false);
+
+  const handleSaveAll = () => {
+    const updated: FamilyProfile = {
+      ...family,
+      children,
       parentPin: pin.trim() || '1234',
     };
-    onUpdateProfile(updated);
+    onUpdateFamily(updated);
 
     if (apiKey.trim()) {
       localStorage.setItem('hw_gemini_api_key', apiKey.trim());
@@ -60,13 +67,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     onClose();
   };
 
+  const handleAddChild = () => {
+    if (!newChildName.trim()) {
+      alert('请输入孩子昵称');
+      return;
+    }
+    const newChild: ChildProfile = {
+      id: `child-${Date.now()}`,
+      name: newChildName.trim(),
+      grade: newChildGrade.trim() || '小学一年级',
+      avatar: newChildAvatar,
+      totalStars: 0,
+      streakDays: 1,
+    };
+    setChildren([...children, newChild]);
+    setNewChildName('');
+    setIsAddingChild(false);
+  };
+
+  const handleDeleteChild = (childId: string) => {
+    if (children.length <= 1) {
+      alert('至少需要保留一位孩子的档案哦');
+      return;
+    }
+    if (confirm('确定要删除这位孩子的档案吗？')) {
+      setChildren(children.filter((c) => c.id !== childId));
+    }
+  };
+
   const handleExport = async () => {
     const json = await StorageService.exportData();
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `作业打卡备份_${profile.studentName}_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `星星作业岛备份_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
     setExportNotice('数据已导出为本地备份文件！');
@@ -111,10 +146,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
             <div>
               <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                系统设置与部署说明
+                家庭档案与系统设置
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                学生资料、静态部署特点与本地数据备份
+                管理多个孩子的作业本、家长 PIN 码与本地数据备份
               </p>
             </div>
           </div>
@@ -127,76 +162,132 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        {/* Deployment FAQ Accordion */}
-        <div className="my-4 p-4 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/50">
-          <div
-            className="flex items-center justify-between cursor-pointer"
-            onClick={() => setShowDeploymentHelp(!showDeploymentHelp)}
-          >
-            <div className="flex items-center gap-2 text-xs font-bold text-blue-900 dark:text-blue-200">
-              <Globe className="w-4 h-4 text-blue-600" />
-              <span>问：部署要简单，静态页面可以么？</span>
-            </div>
-            <span className="text-xs text-blue-600 font-semibold underline">
-              {showDeploymentHelp ? '收起解答' : '查看官方解答'}
-            </span>
+        {/* Multi-Child Profile Management */}
+        <div className="my-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+              <Users className="w-4 h-4 text-blue-500" />
+              <span>家庭宝贝档案 ({children.length} 位孩子)</span>
+            </h3>
+
+            <button
+              type="button"
+              onClick={() => setIsAddingChild(true)}
+              className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>添加孩子</span>
+            </button>
           </div>
 
-          {showDeploymentHelp && (
-            <div className="mt-3 pt-3 border-t border-blue-200/80 dark:border-blue-800/60 text-xs text-blue-950 dark:text-blue-100 space-y-2 leading-relaxed">
-              <p>
-                <strong>✅ 完全可以，而且非常推荐！</strong>
-              </p>
-              <ul className="list-disc list-inside space-y-1 text-slate-700 dark:text-slate-300">
-                <li>
-                  <strong>零服务器成本与免运维</strong>：纯静态页面只需 <code>npm run build</code>，生成的 <code>dist</code> 静态资源可免费直接扔到 GitHub Pages、Cloudflare Pages、Vercel 或局域网 NAS。
-                </li>
-                <li>
-                  <strong>隐私安全与本地持久化</strong>：使用浏览器内置 <code>IndexedDB</code> 存储作业照片、录音与金星数据，不会上传任何外部私有服务器，不泄露孩子隐私。
-                </li>
-                <li>
-                  <strong>原生纯前端语音识别</strong>：采用现代浏览器的 Web Speech API，零延迟、免调用费用，支持低龄孩子口头说出作业。
-                </li>
-                <li>
-                  <strong>支持数据随时备份</strong>：一键导出 JSON 备份文件，换手机或换电脑一键恢复。
-                </li>
-              </ul>
+          {/* Child Card List */}
+          <div className="space-y-2">
+            {children.map((child, idx) => (
+              <div
+                key={child.id}
+                className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-3"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="text-2xl">{child.avatar}</span>
+                  <div>
+                    <input
+                      type="text"
+                      value={child.name}
+                      onChange={(e) => {
+                        const newChildren = [...children];
+                        newChildren[idx].name = e.target.value;
+                        setChildren(newChildren);
+                      }}
+                      className="text-xs font-bold bg-transparent text-slate-900 dark:text-white border-b border-dashed border-slate-300 dark:border-slate-600 focus:outline-none w-20"
+                    />
+                    <input
+                      type="text"
+                      value={child.grade}
+                      onChange={(e) => {
+                        const newChildren = [...children];
+                        newChildren[idx].grade = e.target.value;
+                        setChildren(newChildren);
+                      }}
+                      className="text-[11px] text-slate-500 block bg-transparent border-b border-dashed border-slate-200 dark:border-slate-700 focus:outline-none w-24"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-amber-500 tabular-nums">
+                    ⭐ {child.totalStars}
+                  </span>
+                  {children.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteChild(child.id)}
+                      className="p-1 text-slate-400 hover:text-rose-500"
+                      title="删除此孩子档案"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Add child form */}
+          {isAddingChild && (
+            <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 space-y-2.5 animate-fade-in">
+              <div className="text-xs font-bold text-blue-900 dark:text-blue-200">
+                新增孩子档案：
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <input
+                  type="text"
+                  placeholder="孩子昵称"
+                  value={newChildName}
+                  onChange={(e) => setNewChildName(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white dark:bg-slate-900"
+                />
+                <input
+                  type="text"
+                  placeholder="年级(如三年级)"
+                  value={newChildGrade}
+                  onChange={(e) => setNewChildGrade(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white dark:bg-slate-900"
+                />
+                <select
+                  value={newChildAvatar}
+                  onChange={(e) => setNewChildAvatar(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white dark:bg-slate-900"
+                >
+                  <option value="👦">👦 男孩</option>
+                  <option value="👧">👧 女孩</option>
+                  <option value="👶">👶 宝贝</option>
+                  <option value="🦁">🦁 狮子</option>
+                  <option value="🐼">🐼 熊猫</option>
+                  <option value="🚀">🚀 火箭</option>
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsAddingChild(false)}
+                  className="px-3 py-1 text-xs text-slate-500"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddChild}
+                  className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold"
+                >
+                  确定添加
+                </button>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Profile Settings */}
-        <div className="space-y-4 mb-5">
-          <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-            学生与家长资料
-          </h3>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">
-                学生昵称
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-medium"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">
-                年级阶段
-              </label>
-              <input
-                type="text"
-                value={grade}
-                onChange={(e) => setGrade(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-medium"
-              />
-            </div>
-          </div>
-
+        {/* Security and API Key */}
+        <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-slate-800 mb-5">
           <div>
             <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">
               家长审核 PIN 码（默认 1234，防止低龄小孩误点审核）：
@@ -237,7 +328,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>导出备份 (JSON)</span>
+              <span>导出多孩子备份 (JSON)</span>
             </button>
 
             <label className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors text-center">
@@ -257,7 +348,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               className="text-xs text-rose-600 hover:underline flex items-center gap-1"
             >
               <RefreshCw className="w-3 h-3" />
-              <span>重置为示例作业演示数据</span>
+              <span>重置为双宝贝示例演示数据</span>
             </button>
           </div>
         </div>
@@ -272,11 +363,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
 
           <button
-            onClick={handleSaveProfile}
+            onClick={handleSaveAll}
             className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 flex items-center gap-1.5"
           >
             <Check className="w-4 h-4" />
-            <span>保存设置</span>
+            <span>保存家庭档案设置</span>
           </button>
         </div>
 

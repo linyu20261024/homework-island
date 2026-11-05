@@ -1,9 +1,32 @@
-import { HomeworkTask, StudentProfile } from '../types/homework';
+import { HomeworkTask, StudentProfile, ChildProfile, FamilyProfile } from '../types/homework';
 
 const DB_NAME = 'homework_island_db';
 const DB_VERSION = 1;
 const STORE_TASKS = 'tasks';
 const STORE_SETTINGS = 'settings';
+
+export const DEFAULT_FAMILY_PROFILE: FamilyProfile = {
+  activeChildId: 'child-1',
+  parentPin: '1234',
+  children: [
+    {
+      id: 'child-1',
+      name: '天天',
+      grade: '小学二年级',
+      avatar: '👦',
+      totalStars: 18,
+      streakDays: 5,
+    },
+    {
+      id: 'child-2',
+      name: '瑶瑶',
+      grade: '小学一年级',
+      avatar: '👧',
+      totalStars: 12,
+      streakDays: 3,
+    },
+  ],
+};
 
 const DEFAULT_PROFILE: StudentProfile = {
   studentName: '天天',
@@ -16,6 +39,7 @@ const DEFAULT_PROFILE: StudentProfile = {
 const INITIAL_TASKS: HomeworkTask[] = [
   {
     id: 'demo-task-1',
+    childId: 'child-1',
     title: '背诵《静夜思》并录音打卡',
     subject: 'chinese',
     description: '读准字音，声音洪亮，背诵并录制音频提交给家长检查。',
@@ -27,6 +51,7 @@ const INITIAL_TASKS: HomeworkTask[] = [
   },
   {
     id: 'demo-task-2',
+    childId: 'child-1',
     title: '数学口算小练习第18页',
     subject: 'math',
     description: '独立完成20道两位数加减法，写完后拍照上传作业本。',
@@ -44,6 +69,7 @@ const INITIAL_TASKS: HomeworkTask[] = [
   },
   {
     id: 'demo-task-3',
+    childId: 'child-1',
     title: '英语字母与小绘本跟读',
     subject: 'english',
     description: 'Unit 3 绘本跟读两遍，录下朗读或者拍下跟读打卡单。',
@@ -66,6 +92,30 @@ const INITIAL_TASKS: HomeworkTask[] = [
       comment: '发音非常标准，语调轻快，继续保持！',
       isApproved: true,
     },
+  },
+  {
+    id: 'demo-task-4',
+    childId: 'child-2',
+    title: '拼音声母认读与手指描红',
+    subject: 'chinese',
+    description: '认读 b p m f，完成描红练习第3页，拍作业本照片打卡。',
+    dueDate: new Date().toISOString().split('T')[0],
+    dueTime: '19:00',
+    estimatedMinutes: 15,
+    createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
+    status: 'pending',
+  },
+  {
+    id: 'demo-task-5',
+    childId: 'child-2',
+    title: '数字 1-10 连线图与涂色',
+    subject: 'math',
+    description: '画出小恐龙连线图并涂上喜欢的颜色。',
+    dueDate: new Date().toISOString().split('T')[0],
+    dueTime: '20:00',
+    estimatedMinutes: 20,
+    createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
+    status: 'pending',
   },
 ];
 
@@ -174,27 +224,88 @@ export const StorageService = {
     }
   },
 
-  async getProfile(): Promise<StudentProfile> {
-    const raw = localStorage.getItem('hw_student_profile');
+  async getFamilyProfile(): Promise<FamilyProfile> {
+    const raw = localStorage.getItem('hw_family_profile');
     if (raw) {
       try {
-        return { ...DEFAULT_PROFILE, ...JSON.parse(raw) };
+        return { ...DEFAULT_FAMILY_PROFILE, ...JSON.parse(raw) };
       } catch {
-        return DEFAULT_PROFILE;
+        return DEFAULT_FAMILY_PROFILE;
       }
     }
-    return DEFAULT_PROFILE;
+    // Check legacy single-child profile
+    const legacy = localStorage.getItem('hw_student_profile');
+    if (legacy) {
+      try {
+        const parsed = JSON.parse(legacy);
+        return {
+          activeChildId: 'child-1',
+          parentPin: parsed.parentPin || '1234',
+          children: [
+            {
+              id: 'child-1',
+              name: parsed.studentName || '天天',
+              grade: parsed.grade || '小学二年级',
+              avatar: '👦',
+              totalStars: parsed.totalStars || 18,
+              streakDays: parsed.streakDays || 5,
+            },
+            {
+              id: 'child-2',
+              name: '瑶瑶',
+              grade: '小学一年级',
+              avatar: '👧',
+              totalStars: 12,
+              streakDays: 3,
+            },
+          ],
+        };
+      } catch {
+        return DEFAULT_FAMILY_PROFILE;
+      }
+    }
+    return DEFAULT_FAMILY_PROFILE;
+  },
+
+  async saveFamilyProfile(profile: FamilyProfile): Promise<void> {
+    localStorage.setItem('hw_family_profile', JSON.stringify(profile));
+  },
+
+  async getProfile(): Promise<StudentProfile> {
+    const family = await this.getFamilyProfile();
+    const active = family.children.find((c) => c.id === family.activeChildId) || family.children[0];
+    return {
+      studentName: active?.name || '天天',
+      grade: active?.grade || '小学二年级',
+      totalStars: active?.totalStars || 18,
+      streakDays: active?.streakDays || 5,
+      parentPin: family.parentPin || '1234',
+    };
   },
 
   async saveProfile(profile: StudentProfile): Promise<void> {
-    localStorage.setItem('hw_student_profile', JSON.stringify(profile));
+    const family = await this.getFamilyProfile();
+    const activeIdx = family.children.findIndex((c) => c.id === family.activeChildId);
+    if (activeIdx >= 0) {
+      family.children[activeIdx].name = profile.studentName;
+      family.children[activeIdx].grade = profile.grade;
+      family.children[activeIdx].totalStars = profile.totalStars;
+      family.children[activeIdx].streakDays = profile.streakDays;
+    }
+    family.parentPin = profile.parentPin;
+    await this.saveFamilyProfile(family);
   },
 
-  async awardStars(count: number): Promise<number> {
-    const profile = await this.getProfile();
-    profile.totalStars += count;
-    await this.saveProfile(profile);
-    return profile.totalStars;
+  async awardStars(count: number, childId?: string): Promise<number> {
+    const family = await this.getFamilyProfile();
+    const targetId = childId || family.activeChildId;
+    const child = family.children.find((c) => c.id === targetId) || family.children[0];
+    if (child) {
+      child.totalStars += count;
+      await this.saveFamilyProfile(family);
+      return child.totalStars;
+    }
+    return 0;
   },
 
   getTasksFromLocalStorage(): HomeworkTask[] {
@@ -212,11 +323,11 @@ export const StorageService = {
   // Export all data as JSON
   async exportData(): Promise<string> {
     const tasks = await this.getTasks();
-    const profile = await this.getProfile();
+    const family = await this.getFamilyProfile();
     return JSON.stringify({
-      version: '1.0',
+      version: '2.0',
       exportedAt: new Date().toISOString(),
-      profile,
+      family,
       tasks,
     }, null, 2);
   },
@@ -225,7 +336,9 @@ export const StorageService = {
   async importData(jsonString: string): Promise<boolean> {
     try {
       const parsed = JSON.parse(jsonString);
-      if (parsed.profile) {
+      if (parsed.family) {
+        await this.saveFamilyProfile(parsed.family);
+      } else if (parsed.profile) {
         await this.saveProfile(parsed.profile);
       }
       if (Array.isArray(parsed.tasks)) {
@@ -249,9 +362,10 @@ export const StorageService = {
       const store = tx.objectStore(STORE_TASKS);
       store.clear();
       await this.seedInitialTasks();
-      await this.saveProfile(DEFAULT_PROFILE);
+      await this.saveFamilyProfile(DEFAULT_FAMILY_PROFILE);
     } catch {
       localStorage.removeItem('hw_tasks_backup');
+      localStorage.removeItem('hw_family_profile');
       localStorage.removeItem('hw_student_profile');
     }
   },

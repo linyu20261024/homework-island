@@ -20,6 +20,7 @@ import {
   Calendar,
   Layers,
   Info,
+  Users,
 } from 'lucide-react';
 import { Header } from './components/Header';
 import { StudentStats } from './components/StudentStats';
@@ -37,23 +38,32 @@ import { ParentPinModal } from './components/ParentPinModal';
 import {
   HomeworkTask,
   StudentProfile,
+  ChildProfile,
+  FamilyProfile,
   SubjectType,
   SUBJECT_METAS,
   HomeworkSubmission,
   HomeworkReview,
 } from './types/homework';
-import { StorageService } from './services/storage';
+import { StorageService, DEFAULT_FAMILY_PROFILE } from './services/storage';
 
 export default function App() {
   const [tasks, setTasks] = useState<HomeworkTask[]>([]);
-  const [profile, setProfile] = useState<StudentProfile>({
-    studentName: '天天',
-    grade: '小学二年级',
-    totalStars: 18,
-    streakDays: 5,
-    parentPin: '1234',
-  });
+  const [family, setFamily] = useState<FamilyProfile>(DEFAULT_FAMILY_PROFILE);
   const [loading, setLoading] = useState(true);
+
+  // Active child derived from family profile
+  const activeChild: ChildProfile =
+    family.children.find((c) => c.id === family.activeChildId) || family.children[0];
+
+  // Derived student profile for child-facing components
+  const activeStudentProfile: StudentProfile = {
+    studentName: activeChild?.name || '天天',
+    grade: activeChild?.grade || '小学二年级',
+    totalStars: activeChild?.totalStars || 0,
+    streakDays: activeChild?.streakDays || 1,
+    parentPin: family.parentPin || '1234',
+  };
 
   // Filter states
   const [activeFilter, setActiveFilter] = useState<'all' | 'pending' | 'submitted' | 'approved'>('all');
@@ -76,12 +86,12 @@ export default function App() {
   // Load initial data
   const loadData = async () => {
     try {
-      const [loadedTasks, loadedProfile] = await Promise.all([
+      const [loadedTasks, loadedFamily] = await Promise.all([
         StorageService.getTasks(),
-        StorageService.getProfile(),
+        StorageService.getFamilyProfile(),
       ]);
       setTasks(loadedTasks);
-      setProfile(loadedProfile);
+      setFamily(loadedFamily);
     } catch (e) {
       console.error('Failed to load data:', e);
     } finally {
@@ -92,6 +102,22 @@ export default function App() {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Switch active child
+  const handleSwitchChild = async (childId: string) => {
+    const updated: FamilyProfile = {
+      ...family,
+      activeChildId: childId,
+    };
+    setFamily(updated);
+    await StorageService.saveFamilyProfile(updated);
+  };
+
+  // Update family
+  const handleUpdateFamily = async (updated: FamilyProfile) => {
+    setFamily(updated);
+    await StorageService.saveFamilyProfile(updated);
+  };
 
   // Handle Parent Mode Switch with PIN check
   const handleToggleParentMode = () => {
@@ -108,6 +134,7 @@ export default function App() {
   ) => {
     const newTask: HomeworkTask = {
       ...newTaskData,
+      childId: newTaskData.childId || family.activeChildId,
       id: `task-${Date.now()}`,
       createdAt: new Date().toISOString(),
       status: 'pending',
@@ -125,7 +152,7 @@ export default function App() {
     }
   };
 
-  // Student submits homework (Requirement: student must submit before completion can be stamped)
+  // Student submits homework
   const handleSubmitHomework = async (taskId: string, submission: HomeworkSubmission) => {
     const taskIndex = tasks.findIndex((t) => t.id === taskId);
     if (taskIndex < 0) return;
@@ -156,12 +183,15 @@ export default function App() {
     const taskIndex = tasks.findIndex((t) => t.id === taskId);
     if (taskIndex < 0) return;
 
+    const targetTask = tasks[taskIndex];
+    const targetChildId = targetTask.childId || family.activeChildId;
+
     const updatedTask: HomeworkTask = {
-      ...tasks[taskIndex],
+      ...targetTask,
       status: 'approved',
       review,
       history: [
-        ...(tasks[taskIndex].history || []),
+        ...(targetTask.history || []),
         {
           timestamp: new Date().toISOString(),
           action: `家长审核合格，奖励 ${review.starsAwarded} 颗金星`,
@@ -171,12 +201,15 @@ export default function App() {
     };
 
     await StorageService.saveTask(updatedTask);
-    const newTotalStars = await StorageService.awardStars(review.starsAwarded);
+    await StorageService.awardStars(review.starsAwarded, targetChildId);
+
+    // Refresh family profile
+    const freshFamily = await StorageService.getFamilyProfile();
+    setFamily(freshFamily);
 
     const newTasks = [...tasks];
     newTasks[taskIndex] = updatedTask;
     setTasks(newTasks);
-    setProfile((prev) => ({ ...prev, totalStars: newTotalStars }));
     setSelectedTaskForReview(null);
   };
 
@@ -213,8 +246,17 @@ export default function App() {
     setSelectedTaskForReview(null);
   };
 
-  // Filter tasks based on activeFilter and subject
-  const filteredTasks = tasks.filter((t) => {
+  // Filter tasks: matching active child, and matching status & subject
+  const childTasks = tasks.filter((t) => {
+    // If task has childId, it must match activeChildId or 'all'.
+    // If task has no childId (legacy), show it for the first child.
+    if (t.childId && t.childId !== 'all' && t.childId !== family.activeChildId) {
+      return false;
+    }
+    return true;
+  });
+
+  const filteredTasks = childTasks.filter((t) => {
     // Status filter
     if (activeFilter === 'pending' && t.status !== 'pending' && t.status !== 'revision') {
       return false;
@@ -234,14 +276,18 @@ export default function App() {
     return true;
   });
 
-  const pendingReviewCount = tasks.filter((t) => t.status === 'submitted').length;
+  const pendingReviewCount = childTasks.filter((t) => t.status === 'submitted').length;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
       
-      {/* Top Bar (Strict 3-zone contract) */}
+      {/* Top Bar with Child Switcher */}
       <Header
-        profile={profile}
+        profile={activeStudentProfile}
+        family={family}
+        activeChild={activeChild}
+        onSwitchChild={handleSwitchChild}
+        onAddChildClick={() => setIsSettingsModalOpen(true)}
         isParentMode={isParentMode}
         onToggleParentMode={handleToggleParentMode}
         onOpenCreateModal={() => setIsCreateModalOpen(true)}
@@ -255,19 +301,19 @@ export default function App() {
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         
-        {/* Parent Mode Active Notification Ribbon */}
+        {/* Parent Mode Active Ribbon */}
         {isParentMode && (
-          <div className="mb-6 p-4 rounded-2xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="mb-6 p-4 rounded-2xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold shrink-0">
                 <ShieldCheck className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="text-xs font-bold text-purple-900 dark:text-purple-200">
-                  当前处于：家长 / 老师审核模式
+                  当前处于：家长 / 老师审核模式（正在查看【{activeChild.name}】的作业）
                 </h3>
                 <p className="text-xs text-purple-700/80 dark:text-purple-300/80">
-                  可直接查看学生提交的作业照片与背诵录音，盖章发星 ⭐ 或退回订正。
+                  可直接查看学生提交的作业照片与背诵录音，盖章发星 ⭐ 或退回订正。顶部可随时切换其他孩子。
                 </p>
               </div>
             </div>
@@ -283,8 +329,8 @@ export default function App() {
 
         {/* Student Stats & Quick Entry Hero */}
         <StudentStats
-          profile={profile}
-          tasks={tasks}
+          profile={activeStudentProfile}
+          tasks={childTasks}
           onOpenVoice={() => setIsVoiceModalOpen(true)}
           onOpenPhoto={() => setIsPhotoModalOpen(true)}
           onOpenFocusTimer={() => setIsFocusTimerOpen(true)}
@@ -300,13 +346,13 @@ export default function App() {
                 : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-50'
             }`}
           >
-            全部学科 ({tasks.length})
+            全部学科 ({childTasks.length})
           </button>
 
           {(Object.keys(SUBJECT_METAS) as SubjectType[]).map((subKey) => {
             const meta = SUBJECT_METAS[subKey];
-            const count = tasks.filter((t) => t.subject === subKey).length;
-            if (count === 0 && selectedSubject !== subKey) return null; // keep clean
+            const count = childTasks.filter((t) => t.subject === subKey).length;
+            if (count === 0 && selectedSubject !== subKey) return null;
             const isSelected = selectedSubject === subKey;
             return (
               <button
@@ -330,21 +376,12 @@ export default function App() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <span>
-                {activeFilter === 'all'
-                  ? '全部家庭作业清单'
-                  : activeFilter === 'pending'
-                  ? '待完成作业'
-                  : activeFilter === 'submitted'
-                  ? '已提交待审核作业'
-                  : '已盖章判定合格作业'}
-              </span>
+              <span>{activeChild.avatar} {activeChild.name} 的家庭作业清单</span>
               <span className="text-xs font-normal text-slate-400 tabular-nums">
                 共 {filteredTasks.length} 项
               </span>
             </h2>
 
-            {/* Hint about submission rule */}
             <span className="hidden sm:inline text-xs text-slate-500 dark:text-slate-400">
               💡 核心规则：学生拍照或录音提交后，家长审核即可盖章发星
             </span>
@@ -356,10 +393,10 @@ export default function App() {
                 🎒
               </div>
               <h3 className="text-base font-bold text-slate-800 dark:text-slate-200 mb-1">
-                当前分类下没有作业任务
+                【{activeChild.name}】目前没有这项作业任务
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto mb-5">
-                随时点击“按住说作业”或“拍照录入”，方便低龄孩子一句话快速记下老师布置的要求！
+                点击“记作业”或“按住说作业”，为孩子记录新任务！
               </p>
               <div className="flex justify-center gap-2">
                 <button
@@ -392,32 +429,6 @@ export default function App() {
               ))}
             </div>
           )}
-        </div>
-
-        {/* Static Deployment Guide Card (Direct answer to user prompt) */}
-        <div className="mt-12 p-6 rounded-3xl bg-slate-100/80 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold shrink-0">
-                ✨
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  纯静态部署（Zero-Server Architecture）完全可行且已实现
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  数据基于浏览器持久化 IndexedDB，语音识别使用浏览器 Web Speech API，零后端服务器免维护，开箱即用。
-                </p>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setIsSettingsModalOpen(true)}
-              className="px-4 py-2 text-xs font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-xl hover:bg-slate-50 transition-colors whitespace-nowrap"
-            >
-              部署说明与数据备份
-            </button>
-          </div>
         </div>
 
       </main>
@@ -468,6 +479,8 @@ export default function App() {
         onSaveTask={handleSaveNewTask}
         onOpenVoice={() => setIsVoiceModalOpen(true)}
         onOpenPhoto={() => setIsPhotoModalOpen(true)}
+        childrenList={family.children}
+        activeChildId={family.activeChildId}
       />
 
       <SubmitHomeworkModal
@@ -493,25 +506,22 @@ export default function App() {
       <PrintSummaryModal
         isOpen={isPrintModalOpen}
         onClose={() => setIsPrintModalOpen(false)}
-        tasks={tasks}
-        profile={profile}
+        tasks={childTasks}
+        profile={activeStudentProfile}
       />
 
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
-        profile={profile}
-        onUpdateProfile={(updated) => {
-          setProfile(updated);
-          StorageService.saveProfile(updated);
-        }}
+        family={family}
+        onUpdateFamily={handleUpdateFamily}
         onDataReset={loadData}
       />
 
       <ParentPinModal
         isOpen={isPinModalOpen}
         onClose={() => setIsPinModalOpen(false)}
-        correctPin={profile.parentPin}
+        correctPin={family.parentPin}
         onSuccess={() => setIsParentMode(true)}
       />
 
